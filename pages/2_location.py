@@ -55,6 +55,10 @@ if 'ldf' in st.session_state:
     df_clean['longitude'] = pd.to_numeric(df_clean['longitude'], errors='coerce')
     df_clean = df_clean.dropna(subset=['latitude', 'longitude'])
 
+    # 3. NEW: Force 'valid' to numeric and filter only where value equals 1
+    df_clean['valid'] = pd.to_numeric(df_clean['valid'], errors='coerce')
+    df_clean = df_clean[df_clean['valid'] == 1]
+
     # Define the target products for your 3 tabs
     prod1 = "HealthShare Health Information Exchange"
     prod2 = "IRIS for Health"
