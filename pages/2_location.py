@@ -49,54 +49,74 @@ if 'creds' in st.session_state:
             st.error(f"An error occurred: {e}")
 
 if 'ldf' in st.session_state:
-    df = st.session_state['ldf'].copy()
-    
-    st.subheader("Map View")
-    # Clean data: drop rows missing lat/lon, convert to numeric format
-    df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
-    df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
-    df = df.dropna(subset=['latitude', 'longitude'])
-    
-    if not df.empty:
-        # Configure the data map layer
-        layer = pdk.Layer(
-            "ScatterplotLayer",
-            data=df,
-            get_position="[longitude, latitude]",
-            get_color="[200, 30, 0, 160]",
-            get_radius=50000,  # Radius size in meters
-            pickable=True,     # Must be True for tooltips to function
-        )
-        
-        # Center view around map coordinates
-        view_state = pdk.ViewState(
-            latitude=df['latitude'].mean(),
-            longitude=df['longitude'].mean(),
-            zoom=4,
-            pitch=0,
-        )
-        
-        # Build pydeck container with custom HTML tooltips
-        st.pydeck_chart(
-            pdk.Deck(
-                layers=[layer],
-                initial_view_state=view_state,
-                tooltip={
-                    "html": "<b>Org:</b> {organization}<br/>"
-                            "<b>Type:</b> {organizationtype}<br/>"
-                            "<b>Location:</b> {location}<br/>"
-                            "<b>Patients:</b> {patients}<br/>"
-                            "<b>Product:</b> {product}<br/>"
-                            "<b>Connections:</b> {connections}",
-                    "style": {"backgroundColor": "chocolate", "color": "white"}
-                }
-            )
-        )
+    # Clean the primary dataframe once
+    df_clean = st.session_state['ldf'].copy()
+    df_clean['latitude'] = pd.to_numeric(df_clean['latitude'], errors='coerce')
+    df_clean['longitude'] = pd.to_numeric(df_clean['longitude'], errors='coerce')
+    df_clean = df_clean.dropna(subset=['latitude', 'longitude'])
 
-        st.subheader("Data Table View")
-        st.dataframe(df)
-    else:
-        st.warning("No valid coordinate data available to render the map.")
+    # Define the target products for your 3 tabs
+    prod1 = "HealthShare Health Information Exchange"
+    prod2 = "IRIS for Health"
+    
+    # Create the 3 navigation tabs
+    tab1, tab2, tab3 = st.tabs([prod1, prod2, "Other Products"])
+    
+    # Helper function to generate table and pydeck map for a filtered dataframe
+    def render_tab_content(filtered_df):
+        if not filtered_df.empty:
+            
+            st.subheader("Geographical Distribution")
+            layer = pdk.Layer(
+                "ScatterplotLayer",
+                data=filtered_df,
+                get_position="[longitude, latitude]",
+                get_color="[220, 50, 50, 160]",  # Translucent reddish marker
+                get_radius=60000,
+                pickable=True,
+            )
+            view_state = pdk.ViewState(
+                latitude=filtered_df['latitude'].mean(),
+                longitude=filtered_df['longitude'].mean(),
+                zoom=4,
+            )
+            st.pydeck_chart(
+                pdk.Deck(
+                    layers=[layer],
+                    initial_view_state=view_state,
+                    tooltip={
+                        "html": "<b>Org:</b> {organization}<br/>"
+                                "<b>Type:</b> {organizationtype}<br/>"
+                                "<b>Location:</b> {location}<br/>"
+                                "<b>Patients:</b> {patients}<br/>"
+                                "<b>Facilities:</b> {facilities}<br/>"                                
+                                "<b>Hospitals:</b> {hospitals}<br/>"
+                                "<b>Connections:</b> {connections}",
+                        "style": {"backgroundColor": "chocolate", "color": "white"}
+                    }
+                )
+            )
+
+            st.subheader("Filtered Data View")
+            st.dataframe(filtered_df)
+
+        else:
+            st.info("No matching records found for this product selection.")
+
+    # Populate Tab 1: HealthShare HIE
+    with tab1:
+        df_prod1 = df_clean[df_clean['product'] == prod1]
+        render_tab_content(df_prod1)
+
+    # Populate Tab 2: IRIS for Health
+    with tab2:
+        df_prod2 = df_clean[df_clean['product'] == prod2]
+        render_tab_content(df_prod2)
+
+    # Populate Tab 3: Everything else
+    with tab3:
+        df_other = df_clean[~df_clean['product'].isin([prod1, prod2])]
+        render_tab_content(df_other)
 
 # 4. Clear everything
 if st.sidebar.button("Clear All Session Data"):
