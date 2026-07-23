@@ -4,3 +4,6 @@ pandas
 requests
 pydeck
 intersystems-irispython
+pypdf
+docx2txt
+openpyxl
