@@ -278,7 +278,6 @@ if page == "📁 Ingest Documents":
     except Exception as e:
         pass
 
-    # FIXED: Added "txt" to the allowed file types list
     uploaded_file = st.file_uploader("1. Choose a file", type=["pdf", "docx", "xlsx", "txt"])
     st.write("### 2. Classification & Metadata")
     
@@ -313,10 +312,9 @@ if page == "📁 Ingest Documents":
                     
                     client = get_openai_client()
                     
-                                        conn = get_iris_connection()
+                    conn = get_iris_connection()
                     cursor = conn.cursor()
                     
-                    # FIXED: Use '?' but pass parameters as a LIST [filename] instead of a TUPLE (filename,)
                     cursor.execute("DELETE FROM SQLUser.DocVectors WHERE SourceFile = ?", [filename])
                     cursor.execute("DELETE FROM SQLUser.DocumentMetaStore WHERE FileName = ?", [filename])
                     conn.commit()
@@ -327,7 +325,6 @@ if page == "📁 Ingest Documents":
                         "source_platform": "Streamlit Form"
                     })
                     
-                    # FIXED: Pass parameters as a LIST for metadata insertion
                     cursor.execute("""
                         INSERT INTO SQLUser.DocumentMetaStore (DocID, FileName, Category, Summary, DocLink, DocMetadata) 
                         VALUES (?, ?, ?, ?, ?, ?)
@@ -337,8 +334,6 @@ if page == "📁 Ingest Documents":
                     for chunk in chunks:
                         vector_array = get_embedding(chunk, client)
                         vector_string = ",".join(map(str, vector_array))
-                        
-                        # FIXED: Pass vector parameters as a LIST 
                         cursor.execute("""
                             INSERT INTO SQLUser.DocVectors (SourceFile, TextChunk, Embedding) 
                             VALUES (?, ?, TO_VECTOR(?, DOUBLE, 1536))
@@ -351,6 +346,7 @@ if page == "📁 Ingest Documents":
                     log_to_relational_db("Ingestion", filename, "Success", f"Manually mapped to category: {final_category}")
                     st.success(f"🎉 Successfully ingested '{filename}' under Category: **{final_category}**!")
                     st.rerun()
+
 
 
 # --- PAGE 2: BROWSE KNOWLEDGE BASE ---
