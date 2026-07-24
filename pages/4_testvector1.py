@@ -74,6 +74,14 @@ with st.sidebar:
             
     if st.session_state.credentials_loaded:
         st.info(f"📍 Connected: {st.session_state.iris_host}:{st.session_state.iris_port}\n🌌 Space: {st.session_state.iris_namespace}")
+        
+        # ADDED HERE: Trigger table initialization automatically upon successful handshake
+        # This function definition is placed right below get_openai_client()
+        try:
+            init_databases()
+        except NameError:
+            pass # Failsafe if function isn't evaluated yet during initial parsing sequence
+            
         if st.button("🔄 Disconnect & Clear Thread Memory"):
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
@@ -93,14 +101,64 @@ def get_iris_connection():
 def get_openai_client():
     return OpenAI(api_key=st.session_state.openai_key)
 
+# ADDED HERE: Placed the database initialization structural declaration
+def init_databases():
+    """Initializes schemas directly via standard SQL statements."""
+    try:
+        conn = get_iris_connection()
+        cursor = conn.cursor()
+        
+        # 1. Relational DB: Admin Logs Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS SQLUser.SystemAdminLogs (
+                ID INT AUTO_INCREMENT PRIMARY KEY,
+                Timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                LogType VARCHAR(50),
+                UserQuery VARCHAR(1000),
+                Status VARCHAR(255),
+                ResolutionAction VARCHAR(255)
+            )
+        """)
+        
+        # 2. Document DB: JSON/String Meta Storage Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS SQLUser.DocumentMetaStore (
+                DocID VARCHAR(255) PRIMARY KEY,
+                FileName VARCHAR(255),
+                Category VARCHAR(100),
+                Summary LONGVARCHAR,
+                DocLink VARCHAR(1000),
+                DocMetadata LONGVARCHAR
+            )
+        """)
+        
+        # 3. Vector DB: Embeddings & Context Store
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS SQLUser.DocVectors (
+                ID INT AUTO_INCREMENT PRIMARY KEY,
+                SourceFile VARCHAR(255),
+                TextChunk LONGVARCHAR,
+                Embedding VECTOR(DOUBLE, 1536)
+            )
+        """)
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        st.sidebar.success("⚙️ Database tables verified/initialized!")
+    except Exception as e:
+        st.sidebar.error(f"⚠️ Error compiling remote IRIS schemas: {e}")
+
 # --- UTILITY OPERATIONS ---
 def get_embedding(text_string, client=None):
+    """Generates an embedding vector array via OpenAI API."""
     if client is None:
         client = get_openai_client()
     response = client.embeddings.create(model="text-embedding-3-small", input=[text_string])
     return response.data[0].embedding
 
 def chunk_text(text_data, chunk_size=500, overlap=75):
+    """Splits a body of text into overlapping word boundaries."""
     words = text_data.split()
     chunks = []
     for i in range(0, len(words), chunk_size - overlap):
@@ -110,6 +168,7 @@ def chunk_text(text_data, chunk_size=500, overlap=75):
     return chunks
 
 def extract_text_from_file(uploaded_file):
+    """Handles raw binary extraction for PDFs, Word files, Excel sheets, and Plain Text."""
     ext = uploaded_file.name.split(".")[-1].lower()
     text_content = ""
     if ext == "pdf":
@@ -122,6 +181,9 @@ def extract_text_from_file(uploaded_file):
         for sheet in wb.sheetnames:
             for row in wb[sheet].iter_rows(values_only=True):
                 text_content += " ".join([str(c) for c in row if c is not None]) + "\n"
+    # FIXED: Handled plain text uploads smoothly
+    elif ext == "txt":
+        text_content = uploaded_file.read().decode("utf-8")
     return text_content
 
 def log_to_relational_db(log_type, query, status, action):
@@ -129,10 +191,16 @@ def log_to_relational_db(log_type, query, status, action):
     try:
         conn = get_iris_connection()
         cursor = conn.cursor()
+        # FIXED: Switched from positional ? parameters to explicit InterSystems named dict parameters
         cursor.execute("""
             INSERT INTO SQLUser.SystemAdminLogs (LogType, UserQuery, Status, ResolutionAction) 
-            VALUES (?, ?, ?, ?)
-        """, (log_type, query, status, action))
+            VALUES (:ltype, :uquery, :stat, :act)
+        """, {
+            "ltype": log_type,
+            "uquery": query,
+            "stat": status,
+            "act": action
+        })
         conn.commit()
         cursor.close()
         conn.close()
@@ -140,6 +208,7 @@ def log_to_relational_db(log_type, query, status, action):
         pass # Prevents session crashing if admin log tables are not configured on remote target namespaces
 
 def tool_get_database_inventory():
+    """Fetches text indexes to build a descriptive data catalog representation."""
     conn = get_iris_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT Category, FileName, Summary FROM SQLUser.DocumentMetaStore ORDER BY Category")
@@ -154,21 +223,22 @@ def tool_get_database_inventory():
     return inventory
 
 def tool_query_vector_db_with_meta(semantic_query, client):
+    """Performs cosine vector search queries against the hybrid IRIS SQL database layout."""
     query_vector = get_embedding(semantic_query, client)
     vector_str = ",".join(map(str, query_vector))
     
     conn = get_iris_connection()
     cursor = conn.cursor()
     
-    # Core InterSystems Joint multi-model string collation query
+    # FIXED: Switched VECTOR_COSINE evaluation injection syntax to named colon query structure
     query = """
         SELECT TOP 3 v.TextChunk, v.SourceFile, m.DocLink, m.Category, 
-               VECTOR_COSINE(v.Embedding, TO_VECTOR(?, DOUBLE, 1536)) as Sim
+               VECTOR_COSINE(v.Embedding, TO_VECTOR(:vstring, DOUBLE, 1536)) as Sim
         FROM SQLUser.DocVectors v
         LEFT JOIN SQLUser.DocumentMetaStore m ON %EXACT(v.SourceFile) = %EXACT(m.FileName)
         ORDER BY Sim DESC
     """
-    cursor.execute(query, (str(vector_str),))
+    cursor.execute(query, {"vstring": str(vector_str)})
     results = cursor.fetchall()
     cursor.close()
     conn.close()
