@@ -122,7 +122,12 @@ def extract_text_from_file(uploaded_file):
         for sheet in wb.sheetnames:
             for row in wb[sheet].iter_rows(values_only=True):
                 text_content += " ".join([str(c) for c in row if c is not None]) + "\n"
+    # FIXED: Added support for plaintext files
+    elif ext == "txt":
+        text_content = uploaded_file.read().decode("utf-8")
+        
     return text_content
+
 
 def log_to_relational_db(log_type, query, status, action):
     """Logs system metrics straight down to the custom remote enterprise tables."""
@@ -273,7 +278,8 @@ if page == "📁 Ingest Documents":
     except Exception as e:
         pass
 
-    uploaded_file = st.file_uploader("1. Choose a file", type=["pdf", "docx", "xlsx"])
+    # FIXED: Added "txt" to the allowed file types list
+    uploaded_file = st.file_uploader("1. Choose a file", type=["pdf", "docx", "xlsx", "txt"])
     st.write("### 2. Classification & Metadata")
     
     selected_cat = st.selectbox("Choose a category from your current library:", existing_categories)
@@ -305,11 +311,13 @@ if page == "📁 Ingest Documents":
                     filename = uploaded_file.name
                     doc_id = str(hash(filename) + hash(datetime.now().isoformat()))
                     
+                    client = get_openai_client()
+                    
                     conn = get_iris_connection()
                     cursor = conn.cursor()
                     
-                    cursor.execute("DELETE FROM SQLUser.DocVectors WHERE SourceFile = ?", (filename,))
-                    cursor.execute("DELETE FROM SQLUser.DocumentMetaStore WHERE FileName = ?", (filename,))
+                    cursor.execute("DELETE FROM SQLUser.DocVectors WHERE SourceFile = %s", (filename,))
+                    cursor.execute("DELETE FROM SQLUser.DocumentMetaStore WHERE FileName = %s", (filename,))
                     conn.commit()
                     
                     meta_string = json.dumps({
@@ -320,7 +328,7 @@ if page == "📁 Ingest Documents":
                     
                     cursor.execute("""
                         INSERT INTO SQLUser.DocumentMetaStore (DocID, FileName, Category, Summary, DocLink, DocMetadata) 
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                     """, (doc_id, filename, final_category, manual_summary.strip(), doc_link.strip(), meta_string))
                     
                     chunks = chunk_text(raw_text)
@@ -329,7 +337,7 @@ if page == "📁 Ingest Documents":
                         vector_string = ",".join(map(str, vector_array))
                         cursor.execute("""
                             INSERT INTO SQLUser.DocVectors (SourceFile, TextChunk, Embedding) 
-                            VALUES (?, ?, TO_VECTOR(?, DOUBLE, 1536))
+                            VALUES (%s, %s, TO_VECTOR(%s, DOUBLE, 1536))
                         """, (filename, chunk, vector_string))
                     
                     conn.commit()
@@ -339,6 +347,7 @@ if page == "📁 Ingest Documents":
                     log_to_relational_db("Ingestion", filename, "Success", f"Manually mapped to category: {final_category}")
                     st.success(f"🎉 Successfully ingested '{filename}' under Category: **{final_category}**!")
                     st.rerun()
+
 
 # --- PAGE 2: BROWSE KNOWLEDGE BASE ---
 elif page == "🔍 Browse Knowledge Base":
