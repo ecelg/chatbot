@@ -315,8 +315,9 @@ if page == "📁 Ingest Documents":
                     conn = get_iris_connection()
                     cursor = conn.cursor()
                     
-                    cursor.execute("DELETE FROM SQLUser.DocVectors WHERE SourceFile = ?", [filename])
-                    cursor.execute("DELETE FROM SQLUser.DocumentMetaStore WHERE FileName = ?", [filename])
+                    # FIXED: Switched to explicit named parameters via colon syntax and a dictionary mapping
+                    cursor.execute("DELETE FROM SQLUser.DocVectors WHERE SourceFile = :fname", {"fname": filename})
+                    cursor.execute("DELETE FROM SQLUser.DocumentMetaStore WHERE FileName = :fname", {"fname": filename})
                     conn.commit()
                     
                     meta_string = json.dumps({
@@ -325,19 +326,33 @@ if page == "📁 Ingest Documents":
                         "source_platform": "Streamlit Form"
                     })
                     
+                    # FIXED: Named parameter binding mapping for the MetaStore
                     cursor.execute("""
                         INSERT INTO SQLUser.DocumentMetaStore (DocID, FileName, Category, Summary, DocLink, DocMetadata) 
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, [doc_id, filename, final_category, manual_summary.strip(), doc_link.strip(), meta_string])
+                        VALUES (:did, :fname, :cat, :sum, :lnk, :meta)
+                    """, {
+                        "did": doc_id,
+                        "fname": filename,
+                        "cat": final_category,
+                        "sum": manual_summary.strip(),
+                        "lnk": doc_link.strip(),
+                        "meta": meta_string
+                    })
                     
                     chunks = chunk_text(raw_text)
                     for chunk in chunks:
                         vector_array = get_embedding(chunk, client)
                         vector_string = ",".join(map(str, vector_array))
+                        
+                        # FIXED: Named parameter binding mapping for the Vector DB entries
                         cursor.execute("""
                             INSERT INTO SQLUser.DocVectors (SourceFile, TextChunk, Embedding) 
-                            VALUES (?, ?, TO_VECTOR(?, DOUBLE, 1536))
-                        """, [filename, chunk, vector_string])
+                            VALUES (:fname, :chunk, TO_VECTOR(:vstr, DOUBLE, 1536))
+                        """, {
+                            "fname": filename,
+                            "chunk": chunk,
+                            "vstr": vector_string
+                        })
                     
                     conn.commit()
                     cursor.close()
@@ -346,7 +361,6 @@ if page == "📁 Ingest Documents":
                     log_to_relational_db("Ingestion", filename, "Success", f"Manually mapped to category: {final_category}")
                     st.success(f"🎉 Successfully ingested '{filename}' under Category: **{final_category}**!")
                     st.rerun()
-
 
 
 # --- PAGE 2: BROWSE KNOWLEDGE BASE ---
