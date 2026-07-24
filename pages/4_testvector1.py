@@ -181,7 +181,7 @@ def extract_text_from_file(uploaded_file):
         for sheet in wb.sheetnames:
             for row in wb[sheet].iter_rows(values_only=True):
                 text_content += " ".join([str(c) for c in row if c is not None]) + "\n"
-    # FIXED: Handled plain text uploads smoothly
+    # Handled plain text uploads smoothly
     elif ext == "txt":
         text_content = uploaded_file.read().decode("utf-8")
     return text_content
@@ -350,7 +350,8 @@ if page == "📁 Ingest Documents":
     except Exception as e:
         pass
 
-    uploaded_file = st.file_uploader("1. Choose a file", type=["pdf", "docx", "xlsx"])
+    # FIXED: Added "txt" to the allowed file types list in the UI
+    uploaded_file = st.file_uploader("1. Choose a file", type=["pdf", "docx", "xlsx", "txt"])
     st.write("### 2. Classification & Metadata")
     
     selected_cat = st.selectbox("Choose a category from your current library:", existing_categories)
@@ -382,11 +383,18 @@ if page == "📁 Ingest Documents":
                     filename = uploaded_file.name
                     doc_id = str(hash(filename) + hash(datetime.now().isoformat()))
                     
+                    # Ensure client is initialized for vector embeddings
+                    client = get_openai_client()
+                    
+                    # FIXED: Auto-initialize/verify tables right before executing queries
+                    init_databases()
+                    
                     conn = get_iris_connection()
                     cursor = conn.cursor()
                     
-                    cursor.execute("DELETE FROM SQLUser.DocVectors WHERE SourceFile = ?", (filename,))
-                    cursor.execute("DELETE FROM SQLUser.DocumentMetaStore WHERE FileName = ?", (filename,))
+                    # FIXED: Replaced positional ? with InterSystems named params and dictionaries
+                    cursor.execute("DELETE FROM SQLUser.DocVectors WHERE SourceFile = :fname", {"fname": filename})
+                    cursor.execute("DELETE FROM SQLUser.DocumentMetaStore WHERE FileName = :fname", {"fname": filename})
                     conn.commit()
                     
                     meta_string = json.dumps({
@@ -395,19 +403,33 @@ if page == "📁 Ingest Documents":
                         "source_platform": "Streamlit Form"
                     })
                     
+                    # FIXED: Named parameter binding mapping for the MetaStore
                     cursor.execute("""
                         INSERT INTO SQLUser.DocumentMetaStore (DocID, FileName, Category, Summary, DocLink, DocMetadata) 
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (doc_id, filename, final_category, manual_summary.strip(), doc_link.strip(), meta_string))
+                        VALUES (:did, :fname, :cat, :sum, :lnk, :meta)
+                    """, {
+                        "did": doc_id,
+                        "fname": filename,
+                        "cat": final_category,
+                        "sum": manual_summary.strip(),
+                        "lnk": doc_link.strip(),
+                        "meta": meta_string
+                    })
                     
                     chunks = chunk_text(raw_text)
                     for chunk in chunks:
                         vector_array = get_embedding(chunk, client)
                         vector_string = ",".join(map(str, vector_array))
+                        
+                        # FIXED: Named parameter binding mapping for the Vector DB entries
                         cursor.execute("""
                             INSERT INTO SQLUser.DocVectors (SourceFile, TextChunk, Embedding) 
-                            VALUES (?, ?, TO_VECTOR(?, DOUBLE, 1536))
-                        """, (filename, chunk, vector_string))
+                            VALUES (:fname, :chunk, TO_VECTOR(:vstr, DOUBLE, 1536))
+                        """, {
+                            "fname": filename,
+                            "chunk": chunk,
+                            "vstr": vector_string
+                        })
                     
                     conn.commit()
                     cursor.close()
