@@ -313,11 +313,12 @@ if page == "📁 Ingest Documents":
                     
                     client = get_openai_client()
                     
-                    conn = get_iris_connection()
+                                        conn = get_iris_connection()
                     cursor = conn.cursor()
                     
-                    cursor.execute("DELETE FROM SQLUser.DocVectors WHERE SourceFile = %s", (filename,))
-                    cursor.execute("DELETE FROM SQLUser.DocumentMetaStore WHERE FileName = %s", (filename,))
+                    # FIXED: Use '?' but pass parameters as a LIST [filename] instead of a TUPLE (filename,)
+                    cursor.execute("DELETE FROM SQLUser.DocVectors WHERE SourceFile = ?", [filename])
+                    cursor.execute("DELETE FROM SQLUser.DocumentMetaStore WHERE FileName = ?", [filename])
                     conn.commit()
                     
                     meta_string = json.dumps({
@@ -326,19 +327,22 @@ if page == "📁 Ingest Documents":
                         "source_platform": "Streamlit Form"
                     })
                     
+                    # FIXED: Pass parameters as a LIST for metadata insertion
                     cursor.execute("""
                         INSERT INTO SQLUser.DocumentMetaStore (DocID, FileName, Category, Summary, DocLink, DocMetadata) 
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                    """, (doc_id, filename, final_category, manual_summary.strip(), doc_link.strip(), meta_string))
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, [doc_id, filename, final_category, manual_summary.strip(), doc_link.strip(), meta_string])
                     
                     chunks = chunk_text(raw_text)
                     for chunk in chunks:
                         vector_array = get_embedding(chunk, client)
                         vector_string = ",".join(map(str, vector_array))
+                        
+                        # FIXED: Pass vector parameters as a LIST 
                         cursor.execute("""
                             INSERT INTO SQLUser.DocVectors (SourceFile, TextChunk, Embedding) 
-                            VALUES (%s, %s, TO_VECTOR(%s, DOUBLE, 1536))
-                        """, (filename, chunk, vector_string))
+                            VALUES (?, ?, TO_VECTOR(?, DOUBLE, 1536))
+                        """, [filename, chunk, vector_string])
                     
                     conn.commit()
                     cursor.close()
