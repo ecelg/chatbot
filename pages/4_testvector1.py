@@ -498,7 +498,7 @@ elif page == "💬 RAG Knowledge Assistant":
             system_prompt = f"You are a precise corporate knowledge assistant. Answer the user question based strictly on this context map:\n\n{context_block}"
             status_flag, action_log = "Success", f"Context components discovered (Highest Score: {score:.4f})"
         else:
-            system_prompt = "You are a corporate knowledge assistant. No matching vector context was discovered; reply notifying the user gracefully."
+            system_prompt = "You are a corporate knowledge assistant. No matching vector context was discovered; reply notifying the user in brief within 50 words. In the 1st sentence, please mention not found in the RAG"
             context_block = ""
             status_flag, action_log = "No Context Found", "Vector retrieval below operating similarity limits threshold."
             
